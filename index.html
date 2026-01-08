@@ -87,6 +87,7 @@ body{
   white-space:nowrap;
   font-variant-numeric:tabular-nums;
 }
+
 .btns{
   margin-top:auto;
   display:flex;
@@ -103,6 +104,34 @@ button{
   color:var(--btn-fg);
 }
 button:disabled{ opacity:.6; }
+
+/* --- Wake Lock UI --- */
+.wake-line{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:10px;
+  color: var(--muted);
+  font-size: clamp(14px, 3.8vw, 18px);
+  white-space: nowrap;
+}
+.wake-btn{
+  flex: none;
+  border:none;
+  border-radius:999px;
+  padding:8px 14px;
+  font-size: inherit;
+  font-weight: 900;
+  background: rgba(255,255,255,.92);
+  color: var(--btn-fg);
+}
+.wake-btn.on{
+  background: rgba(255,255,255,1);
+}
+.wake-msg{
+  opacity:.85;
+  font-size: 0.95em;
+}
 </style>
 </head>
 
@@ -110,26 +139,34 @@ button:disabled{ opacity:.6; }
 <div class="wrap">
 
   <div>
-    <div class="big-label">所要時間(hh:mm:ss)</div>
+    <div class="big-label">所要時間</div>
     <div id="elapsed" class="big-time">00:00:00</div>
     <div class="divider"></div>
   </div>
 
   <div class="field">
     <div class="label">ロット数（1ロットあたりの個数）</div>
-    <input id="lotCount" class="value" type="number" min="1" value="20">
+    <input id="lotCount" class="value" type="number" min="1" value="20" inputmode="numeric">
   </div>
   <div class="divider"></div>
 
   <div class="field">
     <div class="label">本日のノルマ（合計個数）</div>
-    <input id="targetCount" class="value" type="number" min="1" value="1000">
+    <input id="targetCount" class="value" type="number" min="1" value="1000" inputmode="numeric">
   </div>
   <div class="divider"></div>
 
   <div>
-    <div class="section-title">予測完了時間(hh:mm:ss)</div>
+    <div class="section-title">予測完了時間</div>
     <div id="pred" class="eta">00:00:00</div>
+
+    <!-- Wake Lock toggle -->
+    <div id="wakeLine" class="wake-line">
+      画面ON維持：
+      <button id="wakeBtn" class="wake-btn" type="button">OFF</button>
+      <span id="wakeMsg" class="wake-msg"></span>
+    </div>
+
     <div class="divider"></div>
   </div>
 
@@ -143,6 +180,7 @@ button:disabled{ opacity:.6; }
 
 <script>
 (() => {
+  // ===== タイマー本体 =====
   let running = false;
   let startMs = 0;
   let elapsedMs = 0;
@@ -156,6 +194,10 @@ button:disabled{ opacity:.6; }
   const startBtn = document.getElementById('startBtn');
   const stopBtn  = document.getElementById('stopBtn');
   const resetBtn = document.getElementById('resetBtn');
+
+  // Wake Lock UI
+  const wakeBtn = document.getElementById('wakeBtn');
+  const wakeMsg = document.getElementById('wakeMsg');
 
   const pad = n => String(n).padStart(2,'0');
 
@@ -216,11 +258,92 @@ button:disabled{ opacity:.6; }
   lotEl.oninput = render;
   targetEl.oninput = render;
 
+  // ===== Wake Lock（安全設計：OFFデフォ、失敗しても壊れない）=====
+  let wakeSupported = ('wakeLock' in navigator);
+  let wakeEnabled = false;
+  let wakeLockSentinel = null;
+
+  function setWakeUI(){
+    wakeBtn.textContent = wakeEnabled ? "ON" : "OFF";
+    wakeBtn.classList.toggle("on", wakeEnabled);
+    if (!wakeSupported) {
+      wakeMsg.textContent = "（未対応）";
+      wakeBtn.disabled = true;
+    } else {
+      wakeBtn.disabled = false;
+    }
+  }
+
+  async function requestWakeLock(){
+    if (!wakeSupported) return false;
+    try{
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+
+      wakeLockSentinel.addEventListener('release', () => {
+        wakeLockSentinel = null;
+        wakeEnabled = false;
+        setWakeUI();
+        wakeMsg.textContent = "（解除）";
+      });
+
+      wakeMsg.textContent = "";
+      return true;
+    }catch(e){
+      wakeLockSentinel = null;
+      wakeEnabled = false;
+      setWakeUI();
+      wakeMsg.textContent = "（ON不可）";
+      return false;
+    }
+  }
+
+  async function releaseWakeLock(){
+    try{
+      if (wakeLockSentinel) await wakeLockSentinel.release();
+    }catch(e){
+      // 無視でOK
+    }finally{
+      wakeLockSentinel = null;
+      wakeEnabled = false;
+      setWakeUI();
+    }
+  }
+
+  // iOS対策：ユーザー操作でONにする
+  wakeBtn.onclick = async () => {
+    if (!wakeSupported) return;
+    if (!wakeEnabled) {
+      wakeEnabled = true;
+      setWakeUI();
+      await requestWakeLock();
+    } else {
+      await releaseWakeLock();
+    }
+  };
+
+  // 画面が隠れたら解放、戻ったらONなら取り直し
+  document.addEventListener('visibilitychange', async () => {
+    if (!wakeSupported) return;
+    if (document.visibilityState === 'hidden') {
+      if (wakeLockSentinel) {
+        try{ await wakeLockSentinel.release(); }catch(e){}
+        wakeLockSentinel = null;
+      }
+    } else {
+      if (wakeEnabled && !wakeLockSentinel) {
+        await requestWakeLock();
+      }
+    }
+  });
+
+  // 初期表示
+  setWakeUI();
   render();
 })();
 </script>
 
 <script>
+  // Service Worker
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('./sw.js');
