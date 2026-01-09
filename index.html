@@ -146,13 +146,13 @@ button:disabled{ opacity:.6; }
 
   <div class="field">
     <div class="label">ロット数（1ロットあたりの個数）</div>
-    <input id="lotCount" class="value" type="number" min="1" value="100" inputmode="numeric">
+    <input id="lotCount" class="value" type="number" min="1" value="20" inputmode="numeric">
   </div>
   <div class="divider"></div>
 
   <div class="field">
     <div class="label">本日のノルマ（合計個数）</div>
-    <input id="targetCount" class="value" type="number" min="1" value="1500" inputmode="numeric">
+    <input id="targetCount" class="value" type="number" min="1" value="1000" inputmode="numeric">
   </div>
   <div class="divider"></div>
 
@@ -160,7 +160,6 @@ button:disabled{ opacity:.6; }
     <div class="section-title">予測完了時間</div>
     <div id="pred" class="eta">00:00:00</div>
 
-    <!-- Wake Lock toggle -->
     <div id="wakeLine" class="wake-line">
       画面ON維持：
       <button id="wakeBtn" class="wake-btn" type="button">OFF</button>
@@ -180,6 +179,10 @@ button:disabled{ opacity:.6; }
 
 <script>
 (() => {
+  // ===== 保存（ロット数・ノルマ）=====
+  // ※キー名を変えると別アプリ扱いで保存が分離される
+  const STORE_KEY = "work_pace_settings_v1";
+
   // ===== タイマー本体 =====
   let running = false;
   let startMs = 0;
@@ -210,14 +213,51 @@ button:disabled{ opacity:.6; }
     return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
   }
 
+  function toPositiveInt(v, fallback){
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    const i = Math.floor(n);
+    return i > 0 ? i : fallback;
+  }
+
+  function saveSettings(){
+    // “未入力で空”の時もあるので、最終的に正の整数に整形して保存
+    const data = {
+      lot: toPositiveInt(lotEl.value, 1),
+      target: toPositiveInt(targetEl.value, 1)
+    };
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(data));
+    }catch(e){
+      // 保存できなくてもアプリ動作は継続
+    }
+  }
+
+  function loadSettings(){
+    try{
+      const raw = localStorage.getItem(STORE_KEY);
+      if(!raw) return;
+      const data = JSON.parse(raw);
+      // 保存値が壊れてても安全に無視できるように
+      if (data && Number.isFinite(Number(data.lot)) && Number(data.lot) > 0) {
+        lotEl.value = String(Math.floor(Number(data.lot)));
+      }
+      if (data && Number.isFinite(Number(data.target)) && Number(data.target) > 0) {
+        targetEl.value = String(Math.floor(Number(data.target)));
+      }
+    }catch(e){
+      // 無視
+    }
+  }
+
   function render(){
     const now = Date.now();
     const cur = running ? elapsedMs + (now - startMs) : elapsedMs;
 
     elapsedEl.textContent = fmtHMS(cur);
 
-    const lot = Math.max(1, Number(lotEl.value) || 1);
-    const target = Math.max(0, Number(targetEl.value) || 0);
+    const lot = Math.max(1, toPositiveInt(lotEl.value, 1));
+    const target = Math.max(0, toPositiveInt(targetEl.value, 0));
 
     // 予測完了時間 = ceil(経過時間 × ノルマ ÷ ロット数)
     const predictedMs = Math.ceil(cur * target / lot);
@@ -252,11 +292,13 @@ button:disabled{ opacity:.6; }
     render();
   }
 
+  // 入力変更 → 保存 → 再計算
+  lotEl.oninput = () => { saveSettings(); render(); };
+  targetEl.oninput = () => { saveSettings(); render(); };
+
   startBtn.onclick = start;
   stopBtn.onclick = stop;
   resetBtn.onclick = reset;
-  lotEl.oninput = render;
-  targetEl.oninput = render;
 
   // ===== Wake Lock（安全設計：OFFデフォ、失敗しても壊れない）=====
   let wakeSupported = ('wakeLock' in navigator);
@@ -279,10 +321,12 @@ button:disabled{ opacity:.6; }
     try{
       wakeLockSentinel = await navigator.wakeLock.request('screen');
 
+      // OS都合/画面状態で解除された時だけ「解除」を見せる
       wakeLockSentinel.addEventListener('release', () => {
         wakeLockSentinel = null;
         wakeEnabled = false;
         setWakeUI();
+        // “解除”表示が気になるなら、ここを空文字にしてOK
         wakeMsg.textContent = "（解除）";
       });
 
@@ -306,10 +350,11 @@ button:disabled{ opacity:.6; }
       wakeLockSentinel = null;
       wakeEnabled = false;
       setWakeUI();
+      // 手動OFFの時は表示を消す（気持ち悪くなりにくい）
+      wakeMsg.textContent = "";
     }
   }
 
-  // iOS対策：ユーザー操作でONにする
   wakeBtn.onclick = async () => {
     if (!wakeSupported) return;
     if (!wakeEnabled) {
@@ -336,7 +381,9 @@ button:disabled{ opacity:.6; }
     }
   });
 
-  // 初期表示
+  // ===== 起動時処理 =====
+  loadSettings();   // ← 保存値を復元
+  saveSettings();   // ← 初回でもJSONを作っておく（保険）
   setWakeUI();
   render();
 })();
