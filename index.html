@@ -179,14 +179,14 @@ button:disabled{ opacity:.6; }
 
 <script>
 (() => {
-  // ===== 保存（ロット数・ノルマ）=====
-  // ※キー名を変えると別アプリ扱いで保存が分離される
-  const STORE_KEY = "work_pace_settings_v1";
+  // ===== 保存（ロット数・ノルマ・所要時間・稼働状態）=====
+  // キーを変えると保存が分離される
+  const STORE_KEY = "work_pace_state_v2";
 
   // ===== タイマー本体 =====
   let running = false;
-  let startMs = 0;
-  let elapsedMs = 0;
+  let startMs = 0;     // 現在の計測開始（再開）時刻（epoch ms）
+  let elapsedMs = 0;   // いままでの累積経過（停止中はこれだけ）
   let timer = null;
 
   const elapsedEl = document.getElementById('elapsed');
@@ -220,40 +220,83 @@ button:disabled{ opacity:.6; }
     return i > 0 ? i : fallback;
   }
 
-  function saveSettings(){
-    // “未入力で空”の時もあるので、最終的に正の整数に整形して保存
-    const data = {
-      lot: toPositiveInt(lotEl.value, 1),
-      target: toPositiveInt(targetEl.value, 1)
+  function currentElapsedMs(){
+    if (!running) return elapsedMs;
+    return elapsedMs + (Date.now() - startMs);
+  }
+
+  function setButtons(){
+    startBtn.disabled = running;
+    stopBtn.disabled = !running;
+  }
+
+  // ---- 保存（頻繁すぎないように間引き）----
+  let lastSavedAt = 0;
+  function saveState(force=false){
+    const now = Date.now();
+    if (!force && (now - lastSavedAt) < 800) return; // 0.8秒未満は保存を間引く
+    lastSavedAt = now;
+
+    const lot = toPositiveInt(lotEl.value, 1);
+    const target = toPositiveInt(targetEl.value, 1);
+
+    const state = {
+      lot,
+      target,
+      // “今この瞬間の累積経過”を保存しておく
+      elapsedMs: currentElapsedMs(),
+      // もし計測中に落ちても復帰できるよう、計測中かどうかと保存時刻を持つ
+      running: running,
+      savedAt: now
     };
+
     try{
-      localStorage.setItem(STORE_KEY, JSON.stringify(data));
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
     }catch(e){
-      // 保存できなくてもアプリ動作は継続
+      // 保存できなくても動作は継続
     }
   }
 
-  function loadSettings(){
+  function loadState(){
     try{
       const raw = localStorage.getItem(STORE_KEY);
-      if(!raw) return;
-      const data = JSON.parse(raw);
-      // 保存値が壊れてても安全に無視できるように
-      if (data && Number.isFinite(Number(data.lot)) && Number(data.lot) > 0) {
-        lotEl.value = String(Math.floor(Number(data.lot)));
+      if(!raw) return false;
+
+      const s = JSON.parse(raw);
+      if(!s || typeof s !== 'object') return false;
+
+      if (Number.isFinite(Number(s.lot)) && Number(s.lot) > 0) {
+        lotEl.value = String(Math.floor(Number(s.lot)));
       }
-      if (data && Number.isFinite(Number(data.target)) && Number(data.target) > 0) {
-        targetEl.value = String(Math.floor(Number(data.target)));
+      if (Number.isFinite(Number(s.target)) && Number(s.target) > 0) {
+        targetEl.value = String(Math.floor(Number(s.target)));
       }
+
+      if (Number.isFinite(Number(s.elapsedMs)) && Number(s.elapsedMs) >= 0) {
+        elapsedMs = Math.floor(Number(s.elapsedMs));
+      } else {
+        elapsedMs = 0;
+      }
+
+      // もし前回「計測中」で落ちていたら、その分（現在時刻 - 保存時刻）を足して復帰
+      // ＝休憩や差し込みも含めた“実作業の所要時間”として自然
+      if (s.running === true && Number.isFinite(Number(s.savedAt))) {
+        const delta = Math.max(0, Date.now() - Number(s.savedAt));
+        elapsedMs += delta;
+        running = true;
+        startMs = Date.now();
+      } else {
+        running = false;
+      }
+
+      return true;
     }catch(e){
-      // 無視
+      return false;
     }
   }
 
   function render(){
-    const now = Date.now();
-    const cur = running ? elapsedMs + (now - startMs) : elapsedMs;
-
+    const cur = currentElapsedMs();
     elapsedEl.textContent = fmtHMS(cur);
 
     const lot = Math.max(1, toPositiveInt(lotEl.value, 1));
@@ -268,37 +311,49 @@ button:disabled{ opacity:.6; }
     if(running) return;
     running = true;
     startMs = Date.now();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    timer = setInterval(render, 200);
+    setButtons();
+    timer = setInterval(() => {
+      render();
+      saveState(false);
+    }, 200);
+    saveState(true);
   }
 
   function stop(){
     if(!running) return;
-    elapsedMs += Date.now() - startMs;
+    elapsedMs = currentElapsedMs();
     running = false;
     clearInterval(timer);
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
+    timer = null;
+    setButtons();
     render();
+    saveState(true);
   }
 
   function reset(){
     running = false;
     clearInterval(timer);
+    timer = null;
     elapsedMs = 0;
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
+    setButtons();
     render();
+    saveState(true);
   }
 
   // 入力変更 → 保存 → 再計算
-  lotEl.oninput = () => { saveSettings(); render(); };
-  targetEl.oninput = () => { saveSettings(); render(); };
+  lotEl.oninput = () => { saveState(true); render(); };
+  targetEl.oninput = () => { saveState(true); render(); };
 
   startBtn.onclick = start;
   stopBtn.onclick = stop;
   resetBtn.onclick = reset;
+
+  // アプリが裏に回ったり閉じられたりするタイミングで、念のため強制保存
+  window.addEventListener('pagehide', () => saveState(true));
+  window.addEventListener('beforeunload', () => saveState(true));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveState(true);
+  });
 
   // ===== Wake Lock（安全設計：OFFデフォ、失敗しても壊れない）=====
   let wakeSupported = ('wakeLock' in navigator);
@@ -320,16 +375,12 @@ button:disabled{ opacity:.6; }
     if (!wakeSupported) return false;
     try{
       wakeLockSentinel = await navigator.wakeLock.request('screen');
-
-      // OS都合/画面状態で解除された時だけ「解除」を見せる
       wakeLockSentinel.addEventListener('release', () => {
         wakeLockSentinel = null;
         wakeEnabled = false;
         setWakeUI();
-        // “解除”表示が気になるなら、ここを空文字にしてOK
         wakeMsg.textContent = "（解除）";
       });
-
       wakeMsg.textContent = "";
       return true;
     }catch(e){
@@ -345,12 +396,11 @@ button:disabled{ opacity:.6; }
     try{
       if (wakeLockSentinel) await wakeLockSentinel.release();
     }catch(e){
-      // 無視でOK
+      // 無視
     }finally{
       wakeLockSentinel = null;
       wakeEnabled = false;
       setWakeUI();
-      // 手動OFFの時は表示を消す（気持ち悪くなりにくい）
       wakeMsg.textContent = "";
     }
   }
@@ -366,7 +416,6 @@ button:disabled{ opacity:.6; }
     }
   };
 
-  // 画面が隠れたら解放、戻ったらONなら取り直し
   document.addEventListener('visibilitychange', async () => {
     if (!wakeSupported) return;
     if (document.visibilityState === 'hidden') {
@@ -381,11 +430,21 @@ button:disabled{ opacity:.6; }
     }
   });
 
-  // ===== 起動時処理 =====
-  loadSettings();   // ← 保存値を復元
-  saveSettings();   // ← 初回でもJSONを作っておく（保険）
+  // ===== 起動時 =====
+  loadState();     // ← 前回状態を復元（所要時間も）
+  setButtons();
+
+  // 計測中で復元された場合、タイマーを再始動
+  if (running) {
+    timer = setInterval(() => {
+      render();
+      saveState(false);
+    }, 200);
+  }
+
   setWakeUI();
   render();
+  saveState(true); // 初回でも状態を確実に保存しておく
 })();
 </script>
 
