@@ -28,7 +28,6 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP",sans-serif;
 }
 
-/* 画面全体を縦に積む */
 .wrap{
   min-height:100vh;
   padding:max(16px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom));
@@ -99,27 +98,22 @@ body{
   align-items:center;
   gap:10px;
   margin-top:10px;
-  color: var(--muted);
-  font-size: clamp(14px, 3.8vw, 18px);
-  white-space: nowrap;
+  color:var(--muted);
+  font-size:clamp(14px,3.8vw,18px);
+  white-space:nowrap;
 }
 .wake-btn{
-  flex: none;
   border:none;
   border-radius:999px;
   padding:8px 14px;
-  font-size: inherit;
-  font-weight: 900;
-  background: rgba(255,255,255,.92);
-  color: var(--btn-fg);
+  font-weight:900;
+  background:#fff;
+  color:var(--btn-fg);
 }
-.wake-btn.on{ background: rgba(255,255,255,1); }
-.wake-msg{
-  opacity:.85;
-  font-size: 0.95em;
-}
+.wake-btn.on{ background:#fff; }
+.wake-msg{ opacity:.8; }
 
-/* ボタンエリアはログの上に置く（ログが伸びても操作は上で完結） */
+/* ボタン */
 .btns{
   display:flex;
   gap:12px;
@@ -131,79 +125,71 @@ button{
   padding:16px 0;
   font-size:clamp(18px,5vw,28px);
   font-weight:800;
-  background:var(--btn-bg);
+  background:#fff;
   color:var(--btn-fg);
 }
 button:disabled{ opacity:.6; }
 
-/* ログ（全件表示 + 縦スクロール） */
+/* ログ */
 .log-title{
-  color: var(--muted);
-  font-size: clamp(14px, 3.8vw, 18px);
+  color:var(--muted);
+  font-size:clamp(14px,3.8vw,18px);
   font-weight:600;
-  margin: 0 0 8px;
 }
 .log-box{
+  margin-top:6px;
   border:2px solid rgba(255,255,255,.35);
-  border-radius: 14px;
-  padding: 10px 12px;
-  color: rgba(255,255,255,.92);
-  font-size: clamp(13px, 3.6vw, 16px);
-  line-height: 1.45;
-  font-variant-numeric: tabular-nums;
-  white-space: pre-line;
-  user-select: text;
+  border-radius:14px;
+  padding:10px 12px;
+  color:rgba(255,255,255,.92);
+  font-size:clamp(12px,3.3vw,15px);
+  line-height:1.45;
+  font-variant-numeric:tabular-nums;
+  white-space:pre-line;
+  user-select:text;
 
-  /* ★ここがキモ：全件表示しつつ、長くなったらスクロール */
-  max-height: 28vh;   /* ここは好みで 25〜40vh くらいで調整可 */
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch; /* iOSで惰性スクロール */
+  max-height:28vh;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }
-.log-empty{
-  opacity: .8;
-}
+.log-empty{ opacity:.8; }
 </style>
 </head>
 
 <body>
 <div class="wrap">
 
-  <!-- 所要時間 -->
   <div>
     <div class="big-label">所要時間</div>
     <div id="elapsed" class="big-time">00:00:00</div>
     <div class="divider"></div>
   </div>
 
-  <!-- ロット数 -->
   <div class="field">
     <div class="label">ロット数（1ロットあたりの個数）</div>
-    <input id="lotCount" class="value" type="number" min="1" value="20" inputmode="numeric">
+    <input id="lotCount" class="value" type="number" min="1" value="20">
   </div>
   <div class="divider"></div>
 
-  <!-- 本日のノルマ -->
   <div class="field">
     <div class="label">本日のノルマ（合計個数）</div>
-    <input id="targetCount" class="value" type="number" min="1" value="1000" inputmode="numeric">
+    <input id="targetCount" class="value" type="number" min="1" value="1000">
   </div>
   <div class="divider"></div>
 
-  <!-- 予測完了時間 -->
   <div>
     <div class="section-title">予測完了時間</div>
     <div id="pred" class="eta">00:00:00</div>
 
     <div class="wake-line">
       画面ON維持：
-      <button id="wakeBtn" class="wake-btn" type="button">OFF</button>
+      <button id="wakeBtn" class="wake-btn">OFF</button>
       <span id="wakeMsg" class="wake-msg"></span>
     </div>
 
     <div class="divider"></div>
   </div>
 
-  <!-- ボタン -->
   <div class="btns">
     <button id="startBtn">スタート</button>
     <button id="stopBtn" disabled>ストップ</button>
@@ -212,7 +198,6 @@ button:disabled{ opacity:.6; }
 
   <div class="divider"></div>
 
-  <!-- ログ（画面の一番下） -->
   <div>
     <div class="log-title">ログ</div>
     <div id="logBox" class="log-box log-empty">（まだありません）</div>
@@ -224,334 +209,120 @@ button:disabled{ opacity:.6; }
 (() => {
   const STORE_KEY = "work_pace_state_v3";
 
-  // タイマー
-  let running = false;
-  let startMs = 0;
-  let elapsedMs = 0;
-  let timer = null;
+  let running=false,startMs=0,elapsedMs=0,timer=null;
+  let segmentStartMs=null;
+  let segments=[];
 
-  // ログ
-  let segmentStartMs = null;
-  let segments = []; // [{start:number, end:number|null}]
+  const elapsedEl=document.getElementById('elapsed');
+  const predEl=document.getElementById('pred');
+  const lotEl=document.getElementById('lotCount');
+  const targetEl=document.getElementById('targetCount');
+  const startBtn=document.getElementById('startBtn');
+  const stopBtn=document.getElementById('stopBtn');
+  const resetBtn=document.getElementById('resetBtn');
+  const wakeBtn=document.getElementById('wakeBtn');
+  const wakeMsg=document.getElementById('wakeMsg');
+  const logBox=document.getElementById('logBox');
 
-  // DOM
-  const elapsedEl = document.getElementById('elapsed');
-  const predEl = document.getElementById('pred');
-  const lotEl = document.getElementById('lotCount');
-  const targetEl = document.getElementById('targetCount');
-
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn  = document.getElementById('stopBtn');
-  const resetBtn = document.getElementById('resetBtn');
-
-  const wakeBtn = document.getElementById('wakeBtn');
-  const wakeMsg = document.getElementById('wakeMsg');
-
-  const logBox = document.getElementById('logBox');
-
-  const pad = n => String(n).padStart(2,'0');
+  const pad=n=>String(n).padStart(2,'0');
 
   function fmtHMS(ms){
-    const s = Math.floor(ms/1000);
-    const ss = s % 60;
-    const m = Math.floor(s/60);
-    const mm = m % 60;
-    const hh = Math.floor(m/60);
-    return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
+    const s=Math.floor(ms/1000);
+    return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`;
   }
 
+  /* ★ 秒まで含めたログ用書式 */
   function fmtStamp(ts){
-    const d = new Date(ts);
-    const mo = pad(d.getMonth()+1);
-    const da = pad(d.getDate());
-    const hh = pad(d.getHours());
-    const mm = pad(d.getMinutes());
-    return `${mo}/${da} ${hh}:${mm}`;
+    const d=new Date(ts);
+    return `${pad(d.getMonth()+1)}/${pad(d.getDate())}_${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   function fmtSegment(seg){
-    const s = fmtStamp(seg.start);
-    if (seg.end == null) return `${s}–…（計測中）`;
-    const e = fmtStamp(seg.end);
-    return `${s}–${e}`;
-  }
-
-  function toPositiveInt(v, fallback){
-    const n = Number(v);
-    if (!Number.isFinite(n)) return fallback;
-    const i = Math.floor(n);
-    return i > 0 ? i : fallback;
+    const s=fmtStamp(seg.start);
+    if(seg.end==null) return `${s}–…（計測中）`;
+    return `${s}–${fmtStamp(seg.end)}`;
   }
 
   function currentElapsedMs(){
-    if (!running) return elapsedMs;
-    return elapsedMs + (Date.now() - startMs);
-  }
-
-  function setButtons(){
-    startBtn.disabled = running;
-    stopBtn.disabled = !running;
+    return running ? elapsedMs+(Date.now()-startMs) : elapsedMs;
   }
 
   function renderLog(){
-    if (segments.length === 0){
-      logBox.textContent = "（まだありません）";
+    if(!segments.length){
+      logBox.textContent="（まだありません）";
       logBox.classList.add("log-empty");
       return;
     }
-    // ★全件表示：古い→新しい（履歴として自然）
-    logBox.textContent = segments.map(fmtSegment).join("\n");
+    logBox.textContent=segments.map(fmtSegment).join("\n");
     logBox.classList.remove("log-empty");
   }
 
   function render(){
-    const cur = currentElapsedMs();
-    elapsedEl.textContent = fmtHMS(cur);
-
-    const lot = Math.max(1, toPositiveInt(lotEl.value, 1));
-    const target = Math.max(0, toPositiveInt(targetEl.value, 0));
-
-    // 予測完了時間 = ceil(経過時間 × ノルマ ÷ ロット数)
-    const predictedMs = Math.ceil(cur * target / lot);
-    predEl.textContent = fmtHMS(predictedMs);
-
+    const cur=currentElapsedMs();
+    elapsedEl.textContent=fmtHMS(cur);
+    const lot=Math.max(1,Number(lotEl.value)||1);
+    const tgt=Math.max(0,Number(targetEl.value)||0);
+    predEl.textContent=fmtHMS(Math.ceil(cur*tgt/lot));
     renderLog();
   }
 
-  // 保存（間引き）
-  let lastSavedAt = 0;
-  function saveState(force=false){
-    const now = Date.now();
-    if (!force && (now - lastSavedAt) < 800) return;
-    lastSavedAt = now;
-
-    const state = {
-      lot: toPositiveInt(lotEl.value, 1),
-      target: toPositiveInt(targetEl.value, 1),
-      elapsedMs: currentElapsedMs(),
-      running,
-      savedAt: now,
-      segmentStartMs,
-      segments
-    };
-
-    try{
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
-    }catch(e){}
+  function save(){
+    localStorage.setItem(STORE_KEY,JSON.stringify({
+      lot:lotEl.value,target:targetEl.value,
+      elapsedMs:currentElapsedMs(),running,
+      savedAt:Date.now(),
+      segmentStartMs,segments
+    }));
   }
 
-  function loadState(){
-    try{
-      const raw = localStorage.getItem(STORE_KEY);
-      if(!raw) return false;
-      const s = JSON.parse(raw);
-      if(!s || typeof s !== 'object') return false;
-
-      if (Number.isFinite(Number(s.lot)) && Number(s.lot) > 0) lotEl.value = String(Math.floor(Number(s.lot)));
-      if (Number.isFinite(Number(s.target)) && Number(s.target) > 0) targetEl.value = String(Math.floor(Number(s.target)));
-
-      elapsedMs = (Number.isFinite(Number(s.elapsedMs)) && Number(s.elapsedMs) >= 0) ? Math.floor(Number(s.elapsedMs)) : 0;
-
-      if (Array.isArray(s.segments)) {
-        segments = s.segments
-          .filter(x => x && Number.isFinite(Number(x.start)))
-          .map(x => ({
-            start: Math.floor(Number(x.start)),
-            end: (x.end == null ? null : (Number.isFinite(Number(x.end)) ? Math.floor(Number(x.end)) : null))
-          }));
-      } else {
-        segments = [];
-      }
-
-      if (s.running === true && Number.isFinite(Number(s.savedAt))) {
-        segmentStartMs = Number.isFinite(Number(s.segmentStartMs)) ? Math.floor(Number(s.segmentStartMs)) : null;
-
-        // 計測中に落ちた時間を加算（救済）
-        const delta = Math.max(0, Date.now() - Number(s.savedAt));
-        elapsedMs += delta;
-
-        running = true;
-        startMs = Date.now();
-
-        // 最後が計測中じゃなければ整合のため追加
-        const last = segments[segments.length - 1];
-        const lastIsRunning = last && last.end == null;
-        if (segmentStartMs && !lastIsRunning) {
-          segments.push({ start: segmentStartMs, end: null });
-        }
-      } else {
-        running = false;
-        segmentStartMs = null;
-      }
-
-      return true;
-    }catch(e){
-      return false;
+  function load(){
+    const s=JSON.parse(localStorage.getItem(STORE_KEY)||"null");
+    if(!s) return;
+    lotEl.value=s.lot||lotEl.value;
+    targetEl.value=s.target||targetEl.value;
+    elapsedMs=s.elapsedMs||0;
+    segments=Array.isArray(s.segments)?s.segments:[];
+    if(s.running){
+      elapsedMs+=Math.max(0,Date.now()-s.savedAt);
+      running=true;startMs=Date.now();
+      if(s.segmentStartMs && !(segments.at(-1)?.end==null))
+        segments.push({start:s.segmentStartMs,end:null});
     }
   }
 
   function start(){
     if(running) return;
-    running = true;
-    startMs = Date.now();
-
-    segmentStartMs = Date.now();
-    segments.push({ start: segmentStartMs, end: null });
-
-    setButtons();
-
-    timer = setInterval(() => {
-      render();
-      saveState(false);
-    }, 200);
-
-    render();
-    saveState(true);
+    running=true;startMs=Date.now();
+    segmentStartMs=Date.now();
+    segments.push({start:segmentStartMs,end:null});
+    stopBtn.disabled=false;startBtn.disabled=true;
+    timer=setInterval(()=>{render();save();},200);
+    save();
   }
-
   function stop(){
     if(!running) return;
-
-    elapsedMs = currentElapsedMs();
-
-    const last = segments[segments.length - 1];
-    if (last && last.end == null) last.end = Date.now();
-
-    running = false;
-    segmentStartMs = null;
-
+    elapsedMs=currentElapsedMs();
+    segments.at(-1).end=Date.now();
+    running=false;segmentStartMs=null;
     clearInterval(timer);
-    timer = null;
-
-    setButtons();
-    render();
-    saveState(true);
+    startBtn.disabled=false;stopBtn.disabled=true;
+    render();save();
   }
-
   function reset(){
-    running = false;
+    running=false;elapsedMs=0;segmentStartMs=null;
     clearInterval(timer);
-    timer = null;
-    elapsedMs = 0;
-    segmentStartMs = null;
-
-    // リセットは「時間だけ」：ログは残す（必要ならここで segments=[] にする）
-    setButtons();
-    render();
-    saveState(true);
+    startBtn.disabled=false;stopBtn.disabled=true;
+    render();save();
   }
 
-  // 入力変更→保存
-  lotEl.oninput = () => { saveState(true); render(); };
-  targetEl.oninput = () => { saveState(true); render(); };
+  startBtn.onclick=start;
+  stopBtn.onclick=stop;
+  resetBtn.onclick=reset;
+  lotEl.oninput=()=>{save();render();};
+  targetEl.oninput=()=>{save();render();};
 
-  startBtn.onclick = start;
-  stopBtn.onclick = stop;
-  resetBtn.onclick = reset;
-
-  window.addEventListener('pagehide', () => saveState(true));
-  window.addEventListener('beforeunload', () => saveState(true));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') saveState(true);
-  });
-
-  // Wake Lock
-  let wakeSupported = ('wakeLock' in navigator);
-  let wakeEnabled = false;
-  let wakeLockSentinel = null;
-
-  function setWakeUI(){
-    wakeBtn.textContent = wakeEnabled ? "ON" : "OFF";
-    wakeBtn.classList.toggle("on", wakeEnabled);
-    if (!wakeSupported) {
-      wakeMsg.textContent = "（未対応）";
-      wakeBtn.disabled = true;
-    } else {
-      wakeBtn.disabled = false;
-    }
-  }
-
-  async function requestWakeLock(){
-    if (!wakeSupported) return false;
-    try{
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      wakeLockSentinel.addEventListener('release', () => {
-        wakeLockSentinel = null;
-        wakeEnabled = false;
-        setWakeUI();
-        wakeMsg.textContent = "（解除）";
-      });
-      wakeMsg.textContent = "";
-      return true;
-    }catch(e){
-      wakeLockSentinel = null;
-      wakeEnabled = false;
-      setWakeUI();
-      wakeMsg.textContent = "（ON不可）";
-      return false;
-    }
-  }
-
-  async function releaseWakeLock(){
-    try{
-      if (wakeLockSentinel) await wakeLockSentinel.release();
-    }catch(e){}finally{
-      wakeLockSentinel = null;
-      wakeEnabled = false;
-      setWakeUI();
-      wakeMsg.textContent = "";
-    }
-  }
-
-  wakeBtn.onclick = async () => {
-    if (!wakeSupported) return;
-    if (!wakeEnabled) {
-      wakeEnabled = true;
-      setWakeUI();
-      await requestWakeLock();
-    } else {
-      await releaseWakeLock();
-    }
-  };
-
-  document.addEventListener('visibilitychange', async () => {
-    if (!wakeSupported) return;
-    if (document.visibilityState === 'hidden') {
-      if (wakeLockSentinel) {
-        try{ await wakeLockSentinel.release(); }catch(e){}
-        wakeLockSentinel = null;
-      }
-    } else {
-      if (wakeEnabled && !wakeLockSentinel) {
-        await requestWakeLock();
-      }
-    }
-  });
-
-  // 起動
-  loadState();
-  setButtons();
-
-  if (running) {
-    timer = setInterval(() => {
-      render();
-      saveState(false);
-    }, 200);
-  }
-
-  setWakeUI();
-  render();
-  saveState(true);
+  load();render();
 })();
-</script>
-
-<script>
-  // Service Worker
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js');
-    });
-  }
 </script>
 
 </body>
