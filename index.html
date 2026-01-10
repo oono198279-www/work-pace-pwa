@@ -181,7 +181,7 @@ button.action:disabled{ opacity:.6; }
     <div class="wake-line">
       画面ON維持：
       <button id="wakeBtn" class="wake-btn" type="button">OFF</button>
-      <span id="wakeMsg" class="wake-msg" id="wakeMsg"></span>
+      <span id="wakeMsg" class="wake-msg"></span>
     </div>
 
     <div class="divider"></div>
@@ -204,18 +204,17 @@ button.action:disabled{ opacity:.6; }
 
 <script>
 (() => {
-  const STORE_KEY = "work_pace_state_v4";
+  const STORE_KEY = "work_pace_state_v5";
 
   // ---- Timer state ----
   let running = false;
-  let startMs = 0;        // current running segment start (for display)
-  let elapsedMs = 0;      // accumulated confirmed time
+  let startMs = 0;
+  let elapsedMs = 0;
   let timer = null;
 
   // ---- Log segments ----
-  // segments: [{start:number, end:number|null}]
   let segmentStartMs = null;
-  let segments = [];
+  let segments = []; // [{start:number, end:number|null}]
 
   // ---- DOM ----
   const elapsedEl = document.getElementById('elapsed');
@@ -246,10 +245,17 @@ button.action:disabled{ opacity:.6; }
     return `${pad(d.getMonth()+1)}/${pad(d.getDate())}_${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
+  // ★ 〜区切り + (所要時間) 付き
   function fmtSegment(seg){
     const s = fmtStamp(seg.start);
-    if (seg.end == null) return `${s} 〜 …（計測中）`;
-    return `${s} 〜 ${fmtStamp(seg.end)}`;
+
+    if (seg.end == null){
+      return `${s} 〜 …（計測中）`;
+    }
+
+    const e = fmtStamp(seg.end);
+    const dur = fmtHMS(seg.end - seg.start);
+    return `${s} 〜 ${e}　(${dur})`;
   }
 
   function currentElapsedMs(){
@@ -330,10 +336,8 @@ button.action:disabled{ opacity:.6; }
         }))
         : [];
 
-      // Wake enabled preference restore
       wakeEnabled = (s.wakeEnabled === true);
 
-      // If it was running, add "downtime" as救済 and keep the segment as running
       if (s.running === true && Number.isFinite(Number(s.savedAt))) {
         const delta = Math.max(0, Date.now() - Number(s.savedAt));
         elapsedMs += delta;
@@ -343,18 +347,12 @@ button.action:disabled{ opacity:.6; }
 
         segmentStartMs = Number.isFinite(Number(s.segmentStartMs)) ? Math.floor(Number(s.segmentStartMs)) : null;
 
-        // Ensure there is exactly one "running" log line
         const last = segments.length ? segments[segments.length - 1] : null;
         const lastIsRunning = !!(last && last.end == null);
 
         if (segmentStartMs) {
-          if (!lastIsRunning) {
-            segments.push({ start: segmentStartMs, end: null });
-          } else {
-            // keep it as-is
-          }
+          if (!lastIsRunning) segments.push({ start: segmentStartMs, end: null });
         } else {
-          // segmentStartMs missing → create one now (still救済)
           segmentStartMs = Date.now();
           if (!lastIsRunning) segments.push({ start: segmentStartMs, end: null });
         }
@@ -372,13 +370,11 @@ button.action:disabled{ opacity:.6; }
     running = true;
     startMs = Date.now();
 
-    // log start
     segmentStartMs = Date.now();
     const last = segments.length ? segments[segments.length - 1] : null;
     if (!(last && last.end == null)) {
       segments.push({ start: segmentStartMs, end: null });
     } else {
-      // already running entry exists, don't add
       segmentStartMs = last.start;
     }
 
@@ -393,7 +389,6 @@ button.action:disabled{ opacity:.6; }
 
     elapsedMs = currentElapsedMs();
 
-    // close log segment
     const last = segments.length ? segments[segments.length - 1] : null;
     if (last && last.end == null) last.end = Date.now();
 
@@ -409,7 +404,6 @@ button.action:disabled{ opacity:.6; }
   }
 
   function reset(){
-    // リセット = 所要時間＋予測（=所要時間に連動）＋ログ を同時にクリア
     running = false;
     if (timer) clearInterval(timer);
     timer = null;
@@ -451,7 +445,6 @@ button.action:disabled{ opacity:.6; }
       wakeBtn.disabled = true;
     } else {
       wakeBtn.disabled = false;
-      // wakeMsgは状況で更新
     }
   }
 
@@ -461,7 +454,6 @@ button.action:disabled{ opacity:.6; }
       wakeLockSentinel = await navigator.wakeLock.request('screen');
       wakeLockSentinel.addEventListener('release', () => {
         wakeLockSentinel = null;
-        // 自動解除された場合もUI整合
         wakeEnabled = false;
         setWakeUI();
         wakeMsg.textContent = "（解除）";
@@ -510,7 +502,6 @@ button.action:disabled{ opacity:.6; }
         wakeLockSentinel = null;
       }
     } else {
-      // 戻ってきたら、ON設定の時だけ取り直す
       if (wakeEnabled && !wakeLockSentinel) {
         await requestWakeLock();
       }
@@ -523,11 +514,7 @@ button.action:disabled{ opacity:.6; }
   setWakeUI();
   render();
 
-  // 起動時にWake ONだったら取得
-  if (wakeEnabled) {
-    // 対応端末なら試す。ダメならUIがON不可に戻る
-    requestWakeLock();
-  }
+  if (wakeEnabled) requestWakeLock();
 
   if (running) {
     timer = setInterval(() => { render(); saveState(false); }, 200);
