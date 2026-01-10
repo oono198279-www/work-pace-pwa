@@ -248,7 +248,7 @@ button.action:disabled{ opacity:.6; }
 
   function fmtSegment(seg){
     const s = fmtStamp(seg.start);
-    if (seg.end == null) return `${s}–…（計測中）`;
+    if (seg.end == null) return `${s}〜…（計測中）`;
     return `${s}–${fmtStamp(seg.end)}`;
   }
 
