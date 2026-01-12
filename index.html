@@ -17,7 +17,6 @@
   --fg:#ffffff;
   --muted:rgba(255,255,255,.8);
   --line:rgba(255,255,255,.55);
-  --btn-bg:#ffffff;
   --btn-fg:#0a2a66;
 }
 *{ box-sizing:border-box; }
@@ -204,7 +203,7 @@ button.action:disabled{ opacity:.6; }
 
 <script>
 (() => {
-  const STORE_KEY = "work_pace_state_v5";
+  const STORE_KEY = "work_pace_state_v6";
 
   // ---- Timer state ----
   let running = false;
@@ -274,13 +273,19 @@ button.action:disabled{ opacity:.6; }
     stopBtn.disabled = !running;
   }
 
+  // ★ ナンバリング付きログ描画
   function renderLog(){
     if (!segments.length){
       logBox.textContent = "（まだありません）";
       logBox.classList.add("log-empty");
       return;
     }
-    logBox.textContent = segments.map(fmtSegment).join("\n");
+
+    logBox.textContent = segments.map((seg, i) => {
+      const no = `№${String(i + 1).padStart(3, '0')}`;
+      return `${no} ${fmtSegment(seg)}`;
+    }).join("\n");
+
     logBox.classList.remove("log-empty");
   }
 
