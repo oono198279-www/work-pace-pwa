@@ -282,7 +282,7 @@ button.action:disabled{ opacity:.6; }
     }
 
     logBox.textContent = segments.map((seg, i) => {
-      const no = `№${String(i + 1).padStart(3, '0')}`;
+      const no = `№${String(i + 1).padStart(2, '0')}`;
       return `${no} ${fmtSegment(seg)}`;
     }).join("\n");
 
